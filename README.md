@@ -2,7 +2,7 @@
 
 A command-line interface tool for controlling the AWS VPN Client on macOS. This tool allows you to connect, disconnect, and manage your AWS VPN connections directly from the terminal.
 
-<img width="1136" alt="image" src="https://github.com/user-attachments/assets/a644f0df-e528-4498-bcde-e14173d5c1fd">
+<img width="1136" alt="image" src="https://github.com/user-attachments/assets/a8937a34-79e1-41ea-944e-946062665040">
 
 ## Features
 
