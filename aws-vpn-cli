@@ -1,0 +1,504 @@
+#!/usr/bin/env python3
+
+import subprocess
+import sys
+import os
+import time
+import json
+import argparse
+from typing import Optional, Dict, List
+import re
+
+class ConsoleSpinner:
+    def __init__(self):
+        self.spinning = False
+        self.spin_chars = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+        self.index = 0
+        
+    def spin(self, message: str):
+        sys.stdout.write(f'\r{self.spin_chars[self.index]} {message}')
+        sys.stdout.flush()
+        self.index = (self.index + 1) % len(self.spin_chars)
+
+class AWSVPNManager:
+    def __init__(self):
+        self.app_path = "/Applications/AWS VPN Client/AWS VPN Client.app"
+        self.spinner = ConsoleSpinner()
+        self.connection_timeout = 60  # Connection timeout in seconds
+        
+    def _run_osascript(self, script: str) -> str:
+        """Run AppleScript and return the output"""
+        try:
+            result = subprocess.run(['osascript', '-e', script], 
+                                 capture_output=True, 
+                                 text=True)
+            return result.stdout.strip()
+        except subprocess.CalledProcessError as e:
+            print(f"Error running AppleScript: {e}", file=sys.stderr)
+            return ""
+
+    def _get_vpn_interface(self) -> Optional[str]:
+        """Get the VPN interface name if connected"""
+        try:
+            # Check for utun interfaces which are typically used for VPN
+            result = subprocess.run(['ifconfig'], capture_output=True, text=True)
+            interfaces = result.stdout.strip().split('\n\n')
+            
+            for interface in interfaces:
+                # Skip loopback interface
+                if interface.startswith('lo0'):
+                    continue
+                # Look for utun interfaces that are UP
+                if 'utun' in interface and 'UP' in interface:
+                    return interface.split(':')[0]
+            
+            # If no utun interface found, check for AWS VPN specific interface
+            result = subprocess.run(['networksetup', '-listallnetworkservices'],
+                                 capture_output=True, text=True)
+            services = result.stdout.strip().split('\n')
+            for service in services:
+                if ('VPN' in service or 'AWS' in service) and not service.startswith('*'):
+                    return service
+        except subprocess.CalledProcessError:
+            pass
+        return None
+
+    def _is_vpn_connected(self) -> bool:
+        """Check if VPN is currently connected"""
+        try:
+            # Primary method: Check AWS VPN Client window state
+            script = '''
+            tell application "System Events"
+                tell process "AWS VPN Client"
+                    try
+                        -- Check if the window exists and has a Disconnect button
+                        if exists window 1 then
+                            if exists button "Disconnect" of window 1 then
+                                -- Also verify the status text if possible
+                                try
+                                    set statusText to value of static text 1 of window 1
+                                    if statusText contains "Connected" then
+                                        return "connected"
+                                    end if
+                                end try
+                            end if
+                        end if
+                    end try
+                end tell
+            end tell
+            '''
+            result = self._run_osascript(script)
+            if result and result.strip() == "connected":
+                # Double check with network interface
+                result = subprocess.run(['ifconfig'], capture_output=True, text=True)
+                interfaces = result.stdout.strip().split('\n\n')
+                for interface in interfaces:
+                    # Look specifically for active utun interfaces
+                    if 'utun' in interface and 'UP' in interface and 'RUNNING' in interface:
+                        return True
+            return False
+            
+        except subprocess.CalledProcessError:
+            return False
+
+    def _get_profiles(self) -> List[str]:
+        """Get list of VPN profiles"""
+        # Launch the app but keep it hidden
+        self._activate_hidden()
+        time.sleep(2)  # Increased wait time for app to load
+        
+        # Get profile names from the UI
+        script = '''
+        tell application "System Events"
+            tell process "AWS VPN Client"
+                try
+                    -- Wait for window to be available
+                    repeat until exists window 1
+                        delay 0.5
+                    end repeat
+                    
+                    -- Try to get profile from popup button
+                    tell window 1
+                        if exists pop up button 1 then
+                            return value of pop up button 1
+                        end if
+                    end tell
+                    
+                    -- If no profile found, try to get from static text
+                    tell window 1
+                        set windowTexts to value of every static text
+                        repeat with txt in windowTexts
+                            if txt starts with "Profile: " then
+                                return text 10 thru -1 of txt
+                            end if
+                        end repeat
+                    end tell
+                    
+                    -- If still no profile, try profiles view
+                    click menu item "Profiles" of menu "View" of menu bar 1
+                    delay 1
+                    
+                    tell window 1
+                        if exists scroll area 1 then
+                            tell scroll area 1
+                                if exists table 1 then
+                                    return name of every row of table 1
+                                end if
+                            end tell
+                        end if
+                    end tell
+                    return ""
+                on error errMsg
+                    return ""
+                end try
+            end tell
+        end tell
+        '''
+        result = self._run_osascript(script)
+        
+        # Hide the app after we're done
+        self._hide_app()
+        
+        if not result:
+            print("❌ Failed to retrieve VPN profiles. Please ensure:")
+            print("  1. AWS VPN Client is installed and running")
+            print("  2. At least one VPN profile is configured")
+            print("  3. You have necessary permissions")
+            self._run_osascript(f'tell application "{self.app_path}" to quit')
+            sys.exit(1)
+            
+        # If we got a single profile
+        if not result.startswith('{') and not ',' in result:
+            profiles = [result]
+        else:
+            # Multiple profiles from the profiles view
+            profiles = result.split(', ') if result else []
+            
+        return profiles
+
+    def _get_current_profile(self) -> Optional[str]:
+        """Get the currently selected or most recently used profile"""
+        script = '''
+        tell application "System Events"
+            tell process "AWS VPN Client"
+                try
+                    -- Wait for window to be available
+                    repeat until exists window 1
+                        delay 0.5
+                    end repeat
+                    
+                    set profileText to ""
+                    
+                    -- Try to get profile from main window first
+                    try
+                        set windowTexts to value of every static text of window 1
+                        repeat with theText in windowTexts
+                            if theText contains "Profile:" then
+                                set profileText to text 10 thru -1 of theText
+                                exit repeat
+                            end if
+                        end repeat
+                    end try
+                    
+                    -- If no profile found in main window, try profiles window
+                    if profileText is "" then
+                        click menu item "Profiles" of menu "View" of menu bar 1
+                        delay 1
+                        if exists table 1 of scroll area 1 of window 1 then
+                            set selectedRows to selected rows of table 1 of scroll area 1 of window 1
+                            if length of selectedRows is greater than 0 then
+                                set profileText to name of item 1 of selectedRows
+                            end if
+                        end if
+                    end if
+                    
+                    return profileText
+                end try
+            end tell
+        end tell
+        '''
+        result = self._run_osascript(script)
+        if result and result.strip() and not "Select a Profile" in result:
+            return result.strip()
+        return None
+
+    def _activate_hidden(self):
+        """Activate the app but try to keep it hidden"""
+        script = f'''
+        tell application "System Events"
+            tell process "AWS VPN Client"
+                try
+                    -- Move window off screen and make it tiny
+                    set position of window 1 to {-10000, -10000}
+                    set size of window 1 to {1, 1}
+                end try
+            end tell
+        end tell
+        
+        tell application "{self.app_path}"
+            activate
+        end tell
+        '''
+        self._run_osascript(script)
+        
+    def _hide_app(self):
+        """Hide the app window"""
+        script = '''
+        tell application "System Events"
+            tell process "AWS VPN Client"
+                try
+                    set visible to false
+                end try
+            end tell
+        end tell
+        '''
+        self._run_osascript(script)
+
+    def connect(self, profile: Optional[str] = None):
+        """Connect to VPN with optional profile name"""
+        if self._is_vpn_connected():
+            print("Already connected to VPN")
+            return
+
+        # Launch the app but keep it hidden
+        self._activate_hidden()
+        time.sleep(2)
+
+        # If no profile specified, try to get current/recent profile
+        if not profile:
+            profile = self._get_current_profile()
+            if profile:
+                print("Using most recently used profile")
+            else:
+                # If no recent profile, use first available
+                profiles = self._get_profiles()
+                if profiles:
+                    profile = profiles[0]
+                    print(f"Using profile: {profile}")
+                else:
+                    print("No VPN profiles found")
+                    return
+
+        # Click connect button with the profile
+        script = f'''
+        tell application "System Events"
+            tell process "AWS VPN Client"
+                try
+                    -- Wait for window to be available
+                    repeat until exists window 1
+                        delay 0.5
+                    end repeat
+                    
+                    -- Try to click connect directly if profile is already selected
+                    try
+                        click button "Connect" of window 1
+                    end try
+                    
+                    -- If that didn't work, try to select profile first
+                    delay 1
+                    if not exists button "Disconnect" of window 1 then
+                        click menu item "Profiles" of menu "View" of menu bar 1
+                        delay 1
+                        select row "{profile}" of table 1 of scroll area 1 of window 1
+                        click button "Connect" of window 1
+                    end if
+                end try
+            end tell
+        end tell
+        '''
+        self._run_osascript(script)
+
+        # Wait for connection with spinner and timeout
+        print("Connecting to VPN...")
+        start_time = time.time()
+        
+        while not self._is_vpn_connected():
+            elapsed_time = time.time() - start_time
+            if elapsed_time >= self.connection_timeout:
+                print(f"\n✗ Connection timeout after {self.connection_timeout} seconds")
+                print("Closing AWS VPN Client due to timeout...")
+                self._run_osascript(f'tell application "{self.app_path}" to quit')
+                return
+            
+            self.spinner.spin(f"Establishing connection... ({int(elapsed_time)}s/{self.connection_timeout}s)")
+            time.sleep(0.1)
+            
+        print("\n✓ Connected to VPN")
+
+    def disconnect(self):
+        """Disconnect from VPN"""
+        if not self._is_vpn_connected():
+            print("Not connected to VPN")
+            return
+
+        # Launch the app but keep it hidden
+        self._activate_hidden()
+        time.sleep(1)
+
+        # Click disconnect button
+        script = '''
+        tell application "System Events"
+            tell process "AWS VPN Client"
+                try
+                    click button "Disconnect" of window 1
+                end try
+            end tell
+        end tell
+        '''
+        self._run_osascript(script)
+
+        # Wait for disconnection with spinner
+        print("Disconnecting from VPN...")
+        timeout = 30
+        start_time = time.time()
+        
+        while self._is_vpn_connected() and (time.time() - start_time) < timeout:
+            self.spinner.spin("Terminating connection...")
+            time.sleep(0.1)
+            
+        if not self._is_vpn_connected():
+            print("\n✓ Disconnected from VPN")
+            # Only quit the app after disconnecting
+            self._run_osascript(f'tell application "{self.app_path}" to quit')
+        else:
+            print("\n✗ Failed to disconnect from VPN")
+
+    def status(self):
+        """Show current VPN status"""
+        if self._is_vpn_connected():
+            interface = self._get_vpn_interface()
+            print(f"✓ Connected to VPN" + (f" ({interface})" if interface else ""))
+            
+            # Get additional connection details if available
+            try:
+                if interface:
+                    # Get interface details
+                    result = subprocess.run(['ifconfig', interface],
+                                         capture_output=True, text=True)
+                    if result.stdout:
+                        print("\nInterface Details:")
+                        print(result.stdout.strip())
+                    
+                    # Get routing information
+                    result = subprocess.run(['netstat', '-nr'],
+                                         capture_output=True, text=True)
+                    if 'utun' in result.stdout:
+                        print("\nRouting Information:")
+                        for line in result.stdout.split('\n'):
+                            if 'utun' in line:
+                                print(line.strip())
+            except subprocess.CalledProcessError:
+                pass
+        else:
+            print("✗ Not connected to VPN")
+
+    def list_profiles(self):
+        """List available VPN profiles"""
+        profiles = self._get_profiles()
+        if profiles:
+            print("Available VPN Profiles:")
+            for profile in profiles:
+                print(f"  • {profile}")
+        else:
+            print("No VPN profiles found")
+
+def get_help_text():
+    """Get the help text for the CLI"""
+    return """AWS VPN Client CLI - Help Information
+        
+Commands:
+  Long form:
+    connect [--profile PROFILE]  Connect to VPN
+    disconnect                   Disconnect from VPN
+    status                      Show VPN connection status
+    list-profiles               List available VPN profiles
+    help                        Show this help information
+
+  Short form:
+    -c, --connect              Connect to VPN
+    -p, --profile PROFILE      Specify VPN profile name for connect
+    -d, --disconnect           Disconnect from VPN
+    -s, --status              Show VPN connection status
+    -lp, --list-profiles      List available VPN profiles
+    -h, --help                Show this help
+
+Examples:
+  aws-vpn connect                     # Connect using most recent profile
+  aws-vpn -c                         # Same as above
+  aws-vpn -c -p "Dev VPN"           # Connect with specific profile
+  aws-vpn -d                         # Disconnect from VPN
+  aws-vpn -s                         # Check VPN status
+  aws-vpn -lp                        # List available profiles
+  aws-vpn -h                         # Show this help
+
+Notes:
+  - Connection will timeout after 60 seconds if unable to establish
+  - The AWS VPN Client app must be installed at: /Applications/AWS VPN Client/
+  - Profiles must be configured in the AWS VPN Client app first
+"""
+
+def custom_help(parser, _):
+    """Custom help action that prints our help text"""
+    print(get_help_text())
+    parser.exit()
+
+def main():
+    # Create custom help action
+    class CustomHelpAction(argparse.Action):
+        def __call__(self, parser, namespace, values, option_string=None):
+            custom_help(parser, None)
+    
+    parser = argparse.ArgumentParser(description='AWS VPN Client CLI', add_help=False)
+    
+    # Add our custom help argument
+    parser.add_argument('-h', '--help', action=CustomHelpAction, nargs=0,
+                       help='Show this help message')
+    
+    # Add top-level arguments for short versions
+    parser.add_argument('-c', '--connect', action='store_true', help='Connect to VPN')
+    parser.add_argument('-d', '--disconnect', action='store_true', help='Disconnect from VPN')
+    parser.add_argument('-s', '--status', action='store_true', help='Show VPN connection status')
+    parser.add_argument('-lp', '--list-profiles', action='store_true', help='List available VPN profiles')
+    parser.add_argument('-p', '--profile', help='VPN profile name for connect command')
+    
+    # Add subcommands for long versions
+    subparsers = parser.add_subparsers(dest='command', help='Commands')
+    connect_parser = subparsers.add_parser('connect', help='Connect to VPN')
+    connect_parser.add_argument('--profile', help='VPN profile name')
+    
+    subparsers.add_parser('disconnect', help='Disconnect from VPN')
+    subparsers.add_parser('status', help='Show VPN connection status')
+    subparsers.add_parser('list-profiles', help='List available VPN profiles')
+    subparsers.add_parser('help', help='Show detailed help information')
+
+    args = parser.parse_args()
+    vpn = AWSVPNManager()
+
+    # Handle top-level short arguments first
+    if args.connect:
+        vpn.connect(args.profile)
+        return
+    elif args.disconnect:
+        vpn.disconnect()
+        return
+    elif args.status:
+        vpn.status()
+        return
+    elif args.list_profiles:
+        vpn.list_profiles()
+        return
+
+    # Handle long-form subcommands
+    if args.command == 'connect':
+        vpn.connect(args.profile)
+    elif args.command == 'disconnect':
+        vpn.disconnect()
+    elif args.command == 'status':
+        vpn.status()
+    elif args.command == 'list-profiles':
+        vpn.list_profiles()
+    elif args.command == 'help' or args.command is None:
+        print(get_help_text())
+
+if __name__ == "__main__":
+    main()
