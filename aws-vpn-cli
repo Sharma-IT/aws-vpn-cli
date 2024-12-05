@@ -146,7 +146,7 @@ class AWSVPNManager:
         self._hide_app()
         
         if not result:
-            print("❌ Failed to retrieve VPN profiles. Please ensure:")
+            print("✗ Failed to retrieve VPN profiles. Please ensure:")
             print("  1. AWS VPN Client is installed and running")
             print("  2. At least one VPN profile is configured")
             print("  3. You have necessary permissions")
@@ -250,7 +250,7 @@ class AWSVPNManager:
                     profile = profiles[0]
                     print(f"Using profile: {profile}")
                 else:
-                    print("No VPN profiles found")
+                    print("✗ No VPN profiles found")
                     return
 
         # Click connect button with the profile
