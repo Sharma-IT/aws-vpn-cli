@@ -101,11 +101,10 @@ class AWSVPNManager:
         except subprocess.CalledProcessError:
             return False
 
-    def _get_profiles(self) -> List[str]:
+    def _get_profiles(self):
         """Get list of VPN profiles"""
-        # Launch the app but keep it hidden
-        self._activate_hidden()
-        time.sleep(2)  # Increased wait time for app to load
+        # Activate the app
+        self._run_osascript(f'tell application "{self.app_path}" to activate')
         
         # Get profile names from the UI
         script = '''
@@ -161,8 +160,11 @@ class AWSVPNManager:
             
         return profiles
 
-    def _get_current_profile(self) -> Optional[str]:
+    def _get_current_profile(self):
         """Get the currently selected or most recently used profile"""
+        # Activate the app
+        self._run_osascript(f'tell application "{self.app_path}" to activate')
+        
         script = '''
         tell application "System Events"
             tell process "AWS VPN Client"
@@ -196,25 +198,6 @@ class AWSVPNManager:
             return result.strip()
         return None
 
-    def _activate_hidden(self):
-        """Activate the app but try to keep it hidden"""
-        script = f'''
-        tell application "System Events"
-            tell process "AWS VPN Client"
-                try
-                    -- Move window off screen and make it tiny
-                    set position of window 1 to {-10000, -10000}
-                    set size of window 1 to {1, 1}
-                end try
-            end tell
-        end tell
-        
-        tell application "{self.app_path}"
-            activate
-        end tell
-        '''
-        self._run_osascript(script)
-        
     def _hide_app(self):
         """Hide the app window"""
         script = '''
@@ -231,14 +214,13 @@ class AWSVPNManager:
     def connect(self, profile: Optional[str] = None):
         """Connect to VPN with optional profile name"""
         if self._is_vpn_connected():
-            print("Already connected to VPN")
+            print("✓ Already connected to VPN")
             return
 
-        # Launch the app but keep it hidden
-        self._activate_hidden()
-        time.sleep(2)
+        # Activate the app
+        self._run_osascript(f'tell application "{self.app_path}" to activate')
 
-        # If no profile specified, try to get current/recent profile
+        # Get the profile to use
         if not profile:
             profile = self._get_current_profile()
             if profile:
@@ -293,11 +275,11 @@ class AWSVPNManager:
     def disconnect(self):
         """Disconnect from VPN"""
         if not self._is_vpn_connected():
-            print("Not connected to VPN")
+            print("✗ Not connected to VPN")
             return
 
         # Launch the app but keep it hidden
-        self._activate_hidden()
+        self._run_osascript(f'tell application "{self.app_path}" to activate')
         time.sleep(1)
 
         # Click disconnect button
