@@ -142,8 +142,8 @@ class AWSVPNManager:
         '''
         result = self._run_osascript(script)
         
-        # Close the app after we're done
-        self._run_osascript(f'tell application "{self.app_path}" to quit')
+        # Hide the app after we're done
+        self._hide_app()
         
         if not result:
             print("❌ Failed to retrieve VPN profiles. Please ensure:")
