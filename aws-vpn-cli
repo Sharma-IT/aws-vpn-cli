@@ -117,26 +117,12 @@ class AWSVPNManager:
                         delay 0.5
                     end repeat
                     
-                    -- Try to get profile from popup button
+                    -- Get profile from popup button
                     tell window 1
                         if exists pop up button 1 then
                             return value of pop up button 1
                         end if
                     end tell
-                    
-                    -- If no profile found, try to get from static text
-                    tell window 1
-                        set windowTexts to value of every static text
-                        repeat with txt in windowTexts
-                            if txt starts with "Profile: " then
-                                return text 10 thru -1 of txt
-                            end if
-                        end repeat
-                    end tell
-                    
-                    -- If still no profile, try profiles view
-                    click menu item "Profiles" of menu "View" of menu bar 1
-                    delay 1
                     
                     tell window 1
                         if exists scroll area 1 then
@@ -156,8 +142,8 @@ class AWSVPNManager:
         '''
         result = self._run_osascript(script)
         
-        # Hide the app after we're done
-        self._hide_app()
+        # Close the app after we're done
+        self._run_osascript(f'tell application "{self.app_path}" to quit')
         
         if not result:
             print("❌ Failed to retrieve VPN profiles. Please ensure:")
@@ -165,7 +151,6 @@ class AWSVPNManager:
             print("  2. At least one VPN profile is configured")
             print("  3. You have necessary permissions")
             self._run_osascript(f'tell application "{self.app_path}" to quit')
-            sys.exit(1)
             
         # If we got a single profile
         if not result.startswith('{') and not ',' in result:
@@ -189,18 +174,7 @@ class AWSVPNManager:
                     
                     set profileText to ""
                     
-                    -- Try to get profile from main window first
-                    try
-                        set windowTexts to value of every static text of window 1
-                        repeat with theText in windowTexts
-                            if theText contains "Profile:" then
-                                set profileText to text 10 thru -1 of theText
-                                exit repeat
-                            end if
-                        end repeat
-                    end try
-                    
-                    -- If no profile found in main window, try profiles window
+                    -- Use profiles window
                     if profileText is "" then
                         click menu item "Profiles" of menu "View" of menu bar 1
                         delay 1
@@ -293,15 +267,6 @@ class AWSVPNManager:
                     try
                         click button "Connect" of window 1
                     end try
-                    
-                    -- If that didn't work, try to select profile first
-                    delay 1
-                    if not exists button "Disconnect" of window 1 then
-                        click menu item "Profiles" of menu "View" of menu bar 1
-                        delay 1
-                        select row "{profile}" of table 1 of scroll area 1 of window 1
-                        click button "Connect" of window 1
-                    end if
                 end try
             end tell
         end tell
@@ -410,26 +375,26 @@ Commands:
   Long form:
     connect [--profile PROFILE]  Connect to VPN
     disconnect                   Disconnect from VPN
-    status                      Show VPN connection status
-    list-profiles               List available VPN profiles
-    help                        Show this help information
+    status                       Show VPN connection status
+    list-profiles                List available VPN profiles
+    help                         Show this help information
 
   Short form:
-    -c, --connect              Connect to VPN
-    -p, --profile PROFILE      Specify VPN profile name for connect
-    -d, --disconnect           Disconnect from VPN
-    -s, --status              Show VPN connection status
-    -lp, --list-profiles      List available VPN profiles
-    -h, --help                Show this help
+    -c, --connect                Connect to VPN
+    -p, --profile PROFILE        Specify VPN profile name for connect
+    -d, --disconnect             Disconnect from VPN
+    -s, --status                 Show VPN connection status
+    -lp, --list-profiles         List available VPN profiles
+    -h, --help                   Show this help
 
 Examples:
-  aws-vpn connect                     # Connect using most recent profile
-  aws-vpn -c                         # Same as above
-  aws-vpn -c -p "Dev VPN"           # Connect with specific profile
-  aws-vpn -d                         # Disconnect from VPN
-  aws-vpn -s                         # Check VPN status
-  aws-vpn -lp                        # List available profiles
-  aws-vpn -h                         # Show this help
+  aws-vpn connect                # Connect using most recent profile
+  aws-vpn -c                     # Same as above
+  aws-vpn -c -p "Dev VPN"        # Connect with specific profile
+  aws-vpn -d                     # Disconnect from VPN
+  aws-vpn -s                     # Check VPN status
+  aws-vpn -lp                    # List available profiles
+  aws-vpn -h                     # Show this help
 
 Notes:
   - Connection will timeout after 60 seconds if unable to establish
