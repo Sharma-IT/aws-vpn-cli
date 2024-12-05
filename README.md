@@ -12,6 +12,7 @@ A command-line interface tool for controlling the AWS VPN Client on macOS. This 
 - 📋 List available VPN profiles
 - ⏱️ Connection timeout handling
 - 🔄 Automatic state detection
+- 📟 Simple and intuitive command-line interface
 
 ## Prerequisites
 
@@ -106,6 +107,14 @@ aws-vpn -lp
 
 # Show help
 aws-vpn -h
+```
+
+## Uninstallation
+
+To uninstall the CLI tool, run:
+
+```bash
+./uninstall.sh
 ```
 
 ## How It Works
