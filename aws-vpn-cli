@@ -350,9 +350,10 @@ class AWSVPNManager:
             print("No VPN profiles found")
         self._run_osascript(f'tell application "{self.app_path}" to quit')
 
-    def get_help_text():
-        """Get the help text for the CLI"""
-        return """AWS VPN Client CLI - Help Information
+
+def get_help_text():
+    """Get the help text for the CLI"""
+    return """AWS VPN Client CLI - Help Information
         
 Commands:
   Long form:
@@ -385,10 +386,12 @@ Notes:
   - Profiles must be configured in the AWS VPN Client app first
 """
 
+
 def custom_help(parser, _):
     """Custom help action that prints our help text"""
     print(get_help_text())
     parser.exit()
+
 
 def main():
     # Create custom help action
