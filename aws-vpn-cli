@@ -361,15 +361,16 @@ class AWSVPNManager:
         """List available VPN profiles"""
         profiles = self._get_profiles()
         if profiles:
-            print("Available VPN Profiles:")
+            print("Available VPN profiles:")
             for profile in profiles:
                 print(f"  • {profile}")
         else:
             print("No VPN profiles found")
+        self._run_osascript(f'tell application "{self.app_path}" to quit')
 
-def get_help_text():
-    """Get the help text for the CLI"""
-    return """AWS VPN Client CLI - Help Information
+    def get_help_text():
+        """Get the help text for the CLI"""
+        return """AWS VPN Client CLI - Help Information
         
 Commands:
   Long form:
