@@ -116,12 +116,26 @@ class AWSVPNManager:
                         delay 0.5
                     end repeat
                     
-                    -- Get profile from popup button
+                    -- Try to get profile from popup button
                     tell window 1
                         if exists pop up button 1 then
                             return value of pop up button 1
                         end if
                     end tell
+
+                    -- If no profile found, try to get from static text
+                    tell window 1
+                        set windowTexts to value of every static text
+                        repeat with txt in windowTexts
+                            if txt starts with "Profile: " then
+                                return text 10 thru -1 of txt
+                            end if
+                        end repeat
+                    end tell
+                    
+                    -- If still no profile, try profiles view
+                    click menu item "Profiles" of menu "View" of menu bar 1
+                    delay 1
                     
                     tell window 1
                         if exists scroll area 1 then
@@ -176,7 +190,18 @@ class AWSVPNManager:
                     
                     set profileText to ""
                     
-                    -- Use profiles window
+                    -- Try to get profile from main window first
+                    try
+                        set windowTexts to value of every static text of window 1
+                        repeat with theText in windowTexts
+                            if theText contains "Profile:" then
+                                set profileText to text 10 thru -1 of theText
+                                exit repeat
+                            end if
+                        end repeat
+                    end try
+                    
+                    -- If no profile found in main window, try profiles window
                     if profileText is "" then
                         click menu item "Profiles" of menu "View" of menu bar 1
                         delay 1
@@ -249,6 +274,15 @@ class AWSVPNManager:
                     try
                         click button "Connect" of window 1
                     end try
+
+                    -- If that didn't work, try to select profile first
+                    delay 1
+                    if not exists button "Disconnect" of window 1 then
+                        click menu item "Profiles" of menu "View" of menu bar 1
+                        delay 1
+                        select row "{profile}" of table 1 of scroll area 1 of window 1
+                        click button "Connect" of window 1
+                    end if
                 end try
             end tell
         end tell
