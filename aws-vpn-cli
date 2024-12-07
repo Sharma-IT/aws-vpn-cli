@@ -8,6 +8,9 @@ import json
 import argparse
 from typing import Optional, Dict, List
 import re
+import logging
+import platform
+import shutil
 
 class ConsoleSpinner:
     def __init__(self):
@@ -21,22 +24,92 @@ class ConsoleSpinner:
         self.index = (self.index + 1) % len(self.spin_chars)
 
 class AWSVPNManager:
-    def __init__(self):
+    def __init__(self, debug=False):
         self.app_path = "/Applications/AWS VPN Client/AWS VPN Client.app"
         self.spinner = ConsoleSpinner()
         self.connection_timeout = 60  # Connection timeout in seconds
         
-    def _run_osascript(self, script: str) -> str:
+        # Setup debugging
+        self.debug = debug
+        if debug:
+            # Create logs directory if it doesn't exist
+            log_dir = os.path.expanduser("~/.aws-vpn-cli/logs")
+            os.makedirs(log_dir, exist_ok=True)
+            
+            # Setup logging to both file and console
+            log_file = os.path.join(log_dir, "debug.log")
+            logging.basicConfig(
+                level=logging.DEBUG,
+                format='%(asctime)s - %(levelname)s - %(message)s',
+                handlers=[
+                    logging.FileHandler(log_file),
+                    logging.StreamHandler()
+                ]
+            )
+            self.logger = logging.getLogger('aws_vpn')
+            self.logger.debug(f"Debug log file: {log_file}")
+        
+    def _get_client_version(self):
+        """Get AWS VPN Client version"""
+        script = '''
+        tell application "System Events"
+            tell process "AWS VPN Client"
+                try
+                    click menu item "About AWS VPN Client" of menu "AWS VPN Client" of menu bar 1
+                    delay 0.5
+                    set version_text to value of static text 1 of window 1
+                    click button 1 of window 1
+                    return version_text
+                on error
+                    return ""
+                end try
+            end tell
+        end tell
+        '''
+        result = self._run_osascript(script)
+        return result.strip() if result else "Unknown"
+
+    def _debug_system_info(self):
+        """Gather system information for debugging"""
+        if not self.debug:
+            return
+            
+        self.logger.debug("System Information:")
+        self.logger.debug(f"OS: {platform.system()} {platform.release()}")
+        self.logger.debug(f"Python: {platform.python_version()}")
+        
+        # Check AWS VPN Client installation and version
+        if os.path.exists(self.app_path):
+            self.logger.debug("✓ AWS VPN Client is installed")
+            version = self._get_client_version()
+            self.logger.debug(f"AWS VPN Client version: {version}")
+        else:
+            self.logger.debug("✗ AWS VPN Client not found at expected location")
+            
+        # Check osascript availability
+        if shutil.which('osascript'):
+            self.logger.debug("✓ osascript is available")
+        else:
+            self.logger.debug("✗ osascript not found")
+            
+    def _run_osascript(self, script: str):
         """Run AppleScript and return the output"""
+        if self.debug:
+            self.logger.debug(f"Running AppleScript: {script}")
+            
         try:
             result = subprocess.run(['osascript', '-e', script], 
                                  capture_output=True, 
-                                 text=True)
+                                 text=True, 
+                                 check=True)
+            if self.debug:
+                self.logger.debug(f"Script output: {result.stdout}")
             return result.stdout.strip()
         except subprocess.CalledProcessError as e:
-            print(f"Error running AppleScript: {e}", file=sys.stderr)
-            return ""
-
+            if self.debug:
+                self.logger.error(f"Script error: {e.stderr}")
+            return None
+            
     def _get_vpn_interface(self) -> Optional[str]:
         """Get the VPN interface name if connected"""
         try:
@@ -105,7 +178,7 @@ class AWSVPNManager:
         """Get list of VPN profiles"""
         # Activate the app
         self._run_osascript(f'tell application "{self.app_path}" to activate')
-        
+
         # Get profile names from the UI
         script = '''
         tell application "System Events"
@@ -213,27 +286,50 @@ class AWSVPNManager:
 
     def connect(self, profile: Optional[str] = None):
         """Connect to VPN with optional profile name"""
+        if self.debug:
+            self._debug_system_info()
+            self.logger.debug(f"Attempting to connect with profile: {profile}")
+            
         if self._is_vpn_connected():
             print("✓ Already connected to VPN")
             return
 
         # Activate the app
         self._run_osascript(f'tell application "{self.app_path}" to activate')
+        
+        if self.debug:
+            self.logger.debug("Checking for existing profiles...")
+        profiles = self._get_profiles()
+        if not profiles:
+            if self.debug:
+                self.logger.error("No profiles found")
+            return
+            
+        if self.debug:
+            self.logger.debug(f"Available profiles: {profiles}")
 
         # Get the profile to use
         if not profile:
             profile = self._get_current_profile()
             if profile:
-                print("Using most recently used profile")
+                if self.debug:
+                    self.logger.debug(f"Using current profile: {profile}")
+                print(f"Using profile: {profile}")
             else:
-                # If no recent profile, use first available
-                profiles = self._get_profiles()
-                if profiles:
+                if len(profiles) == 1:
                     profile = profiles[0]
+                    if self.debug:
+                        self.logger.debug(f"Using only available profile: {profile}")
                     print(f"Using profile: {profile}")
                 else:
+                    if self.debug:
+                        self.logger.error("No profile specified and multiple profiles available")
                     print("✗ No VPN profiles found")
                     return
+        else:
+            if self.debug:
+                self.logger.debug(f"Using specified profile: {profile}")
+            print(f"Using profile: {profile}")
 
         # Click connect button with the profile
         script = f'''
@@ -411,6 +507,7 @@ def main():
     parser.add_argument('-s', '--status', action='store_true', help='Show VPN connection status')
     parser.add_argument('-lp', '--list-profiles', action='store_true', help='List available VPN profiles')
     parser.add_argument('-p', '--profile', help='VPN profile name for connect command')
+    parser.add_argument('-debug', '--debug', action='store_true', help='Enable debug mode')
     
     # Add subcommands for long versions
     subparsers = parser.add_subparsers(dest='command', help='Commands')
@@ -423,7 +520,7 @@ def main():
     subparsers.add_parser('help', help='Show detailed help information')
 
     args = parser.parse_args()
-    vpn = AWSVPNManager()
+    vpn = AWSVPNManager(debug=args.debug)
 
     # Handle top-level short arguments first
     if args.connect:
