@@ -1,3 +1,5 @@
+# NOTE: As of version 5.x.y of the AWS VPN Client, this tool currently does not work because the AWS VPN Client no longer uses "Disconnect"/"Connect" commands. Please be aware of this limitation before using the tool.
+
 # AWS VPN CLI
 
 A command-line interface tool for controlling the AWS VPN Client on macOS. This tool allows you to connect, disconnect, and manage your AWS VPN connections directly from the terminal.
@@ -6,14 +8,14 @@ A command-line interface tool for controlling the AWS VPN Client on macOS. This 
 
 ## Features
 
-- 🔌 Connect to VPN using most recent or specified profile
-- 🔍 Auto-detection of most recently used profile
-- 📊 Real-time connection status
-- 📋 List available VPN profiles
-- ⏱️ Connection timeout handling
-- 🔄 Automatic state detection
-- 🐛 Debug mode for troubleshooting
-- 📟 Simple and intuitive command-line interface
+- Connect to VPN using most recent or specified profile  
+- Auto-detection of most recently used profile  
+- Real-time connection status  
+- List available VPN profiles  
+- Connection timeout handling  
+- Automatic state detection  
+- Debug mode for troubleshooting  
+- Simple and intuitive command-line interface  
 
 ## Requirements
 
@@ -113,7 +115,7 @@ If you encounter a problem:
 
 1. First, ensure you're using the latest version of:
    - AWS VPN Client
-   - aws-vpn-cli
+   - `aws-vpn-cli`
 
 2. Run the failing command with debug mode:
    ```bash
