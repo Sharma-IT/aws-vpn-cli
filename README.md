@@ -1,4 +1,4 @@
-# NOTE: As of version 5.x.y of the AWS VPN Client, this tool currently does not work because the AWS VPN Client no longer uses "Disconnect"/"Connect" commands. Please be aware of this limitation before using the tool.
+> **NOTE:** As of version 5.x.y of the AWS VPN Client, this tool currently does not work because the AWS VPN Client no longer uses "Disconnect"/"Connect" commands. Please be aware of this limitation before using the tool.
 
 # AWS VPN CLI
 
